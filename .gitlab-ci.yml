@@ -1,0 +1,25 @@
+stages:
+  - test
+
+variables:
+  GOPROXY: https://proxy.golang.org,direct
+
+go-test:
+  stage: test
+  image: golang:1.25-alpine
+  cache:
+    key:
+      files:
+        - go.sum
+    paths:
+      - .go/pkg/mod
+      - .go/cache
+  variables:
+    GOPATH: $CI_PROJECT_DIR/.go
+    GOCACHE: $CI_PROJECT_DIR/.go/cache
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  script:
+    - apk add --no-cache git
+    - go test ./... -short
