@@ -202,7 +202,7 @@ func (b *Bot) subscribeChat(chatID int64, private bool) {
 	if private {
 		b.reply(chatID, "Вы подписались на оповещения об опасности БПЛА/ракет в Челябинской области.\n\nКоманды:\n/stop — отписка\n/status — статус\n/last — последнее сообщение")
 	} else {
-		b.reply(chatID, "Этот чат подписан на оповещения об опасности БПЛА/ракет в Челябинской области.\n/stop — отписка чата (только администратор).")
+		b.reply(chatID, "Этот чат подписан на оповещения об опасности БПЛА/ракет в Челябинской области\n/status — статус\n/last — последнее сообщение")
 	}
 	if a := b.store.ActiveDanger(); a != nil {
 		b.sendAlert(chatID, *a)
