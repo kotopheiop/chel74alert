@@ -63,11 +63,12 @@ func (b *Bot) Run(ctx context.Context) {
 		u.AllowedUpdates = []string{"message", "my_chat_member"}
 		updates, err := b.api.GetUpdates(u)
 		if err != nil {
-			log.Printf("getUpdates: %s", b.redact(err))
+			wait := pollRetryWait(err)
+			log.Printf("getUpdates: %s; повтор через %s", b.redact(err), wait.Truncate(time.Second))
 			select {
 			case <-ctx.Done():
 				return
-			case <-time.After(3 * time.Second):
+			case <-time.After(wait):
 			}
 			continue
 		}
@@ -78,6 +79,23 @@ func (b *Bot) Run(ctx context.Context) {
 			b.handle(upd)
 		}
 	}
+}
+
+func pollRetryWait(err error) time.Duration {
+	const fallback = 3 * time.Second
+	const maxWait = 2 * time.Minute
+	if err == nil {
+		return fallback
+	}
+	var apiErr *tgbotapi.Error
+	if errors.As(err, &apiErr) && apiErr != nil && apiErr.RetryAfter > 0 {
+		d := time.Duration(apiErr.RetryAfter) * time.Second
+		if d > maxWait {
+			return maxWait
+		}
+		return d
+	}
+	return fallback
 }
 
 func (b *Bot) handle(upd tgbotapi.Update) {

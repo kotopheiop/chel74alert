@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -17,11 +18,19 @@ import (
 
 const userAgent = "Mozilla/5.0 (compatible; Chel74Alert/1.0; Chelyabinsk UAV/missile RSS monitor)"
 
+type feedHealth struct {
+	fails     int
+	skipUntil time.Time
+}
+
 type Poller struct {
 	cfg    config.Config
 	store  *store.Store
 	parser *gofeed.Parser
 	out    chan<- models.Alert
+
+	mu     sync.Mutex
+	health map[string]*feedHealth
 }
 
 func Start(ctx context.Context, cfg config.Config, st *store.Store, out chan<- models.Alert) {
@@ -30,6 +39,7 @@ func Start(ctx context.Context, cfg config.Config, st *store.Store, out chan<- m
 		store:  st,
 		parser: gofeed.NewParser(),
 		out:    out,
+		health: make(map[string]*feedHealth),
 	}
 	p.parser.Client = rssClient()
 
@@ -47,18 +57,47 @@ func Start(ctx context.Context, cfg config.Config, st *store.Store, out chan<- m
 	}
 }
 
+type feedResult struct {
+	feed  config.Feed
+	items []models.Alert
+	err   error
+	skip  bool
+}
+
 func (p *Poller) poll(ctx context.Context) {
-	var found []models.Alert
-	for _, feed := range p.cfg.Feeds {
+	results := make([]feedResult, len(p.cfg.Feeds))
+	var wg sync.WaitGroup
+	for i, feed := range p.cfg.Feeds {
 		if ctx.Err() != nil {
-			return
+			break
 		}
-		items, err := p.fetch(ctx, feed)
-		if err != nil {
-			log.Printf("rss %s: %v", feed.Name, err)
+		if p.shouldSkip(feed) {
+			results[i] = feedResult{feed: feed, skip: true}
 			continue
 		}
-		found = append(found, items...)
+		wg.Add(1)
+		go func(i int, feed config.Feed) {
+			defer wg.Done()
+			items, err := p.fetch(ctx, feed)
+			results[i] = feedResult{feed: feed, items: items, err: err}
+		}(i, feed)
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return
+	}
+
+	var found []models.Alert
+	for _, r := range results {
+		if r.skip || r.feed.URL == "" {
+			continue
+		}
+		if r.err != nil {
+			p.noteFail(r.feed, r.err)
+			continue
+		}
+		p.noteOK(r.feed)
+		found = append(found, r.items...)
 	}
 
 	ids := make([]string, 0, len(found))
@@ -135,8 +174,61 @@ func (p *Poller) hydrateCandidate(found []models.Alert) *models.Alert {
 	return best
 }
 
+func (p *Poller) shouldSkip(feed config.Feed) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h := p.health[feed.URL]
+	return h != nil && time.Now().Before(h.skipUntil)
+}
+
+func (p *Poller) noteFail(feed config.Feed, err error) {
+	p.mu.Lock()
+	h := p.health[feed.URL]
+	if h == nil {
+		if p.health == nil {
+			p.health = make(map[string]*feedHealth)
+		}
+		h = &feedHealth{}
+		p.health[feed.URL] = h
+	}
+	h.fails++
+	backoff := feedBackoff(h.fails)
+	h.skipUntil = time.Now().Add(backoff)
+	fails := h.fails
+	p.mu.Unlock()
+
+	if backoff > 0 {
+		log.Printf("rss %s: %v; пауза %s после %d ошибок", feed.Name, err, backoff.Truncate(time.Second), fails)
+		return
+	}
+	log.Printf("rss %s: %v", feed.Name, err)
+}
+
+func (p *Poller) noteOK(feed config.Feed) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	h := p.health[feed.URL]
+	if h == nil || h.fails == 0 {
+		return
+	}
+	log.Printf("rss %s: снова читается после %d ошибок", feed.Name, h.fails)
+	h.fails = 0
+	h.skipUntil = time.Time{}
+}
+
+func feedBackoff(fails int) time.Duration {
+	if fails <= 1 {
+		return 0
+	}
+	shift := fails - 2
+	if shift > 4 {
+		return 30 * time.Minute
+	}
+	return time.Duration(1<<shift) * time.Minute
+}
+
 func (p *Poller) fetch(ctx context.Context, feed config.Feed) ([]models.Alert, error) {
-	fp, err := p.parser.ParseURLWithContext(feed.URL, ctx)
+	fp, err := p.rssParser().ParseURLWithContext(feed.URL, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -174,6 +266,16 @@ func (p *Poller) fetch(ctx context.Context, feed config.Feed) ([]models.Alert, e
 		})
 	}
 	return out, nil
+}
+
+func (p *Poller) rssParser() *gofeed.Parser {
+	parser := gofeed.NewParser()
+	if p.parser != nil && p.parser.Client != nil {
+		parser.Client = p.parser.Client
+	} else {
+		parser.Client = rssClient()
+	}
+	return parser
 }
 
 func rssClient() *http.Client {

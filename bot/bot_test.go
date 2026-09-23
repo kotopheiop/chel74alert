@@ -385,6 +385,24 @@ func TestNotifyUnsubscribesBlockedChat(t *testing.T) {
 	}
 }
 
+func TestPollRetryWait(t *testing.T) {
+	if d := pollRetryWait(nil); d != 3*time.Second {
+		t.Fatalf("без ошибки %s", d)
+	}
+	err := &tgbotapi.Error{Code: 429, Message: "Too Many Requests: retry after 5", ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: 5}}
+	if d := pollRetryWait(err); d != 5*time.Second {
+		t.Fatalf("retry after 5 → %s", d)
+	}
+	err = &tgbotapi.Error{Code: 429, Message: "Too Many Requests: retry after 999", ResponseParameters: tgbotapi.ResponseParameters{RetryAfter: 999}}
+	if d := pollRetryWait(err); d != 2*time.Minute {
+		t.Fatalf("потолок 2м, получили %s", d)
+	}
+	err = &tgbotapi.Error{Code: 502, Message: "Bad Gateway"}
+	if d := pollRetryWait(err); d != 3*time.Second {
+		t.Fatalf("502 без retry_after: %s", d)
+	}
+}
+
 func dump(msgs []tgMsg) string {
 	raw, _ := json.Marshal(msgs)
 	return string(raw)

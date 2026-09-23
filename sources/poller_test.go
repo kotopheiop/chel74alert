@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,6 +194,60 @@ func rewriteFeed(t *testing.T, p *Poller, body string) string {
 	t.Cleanup(srv.Close)
 	p.parser.Client = srv.Client()
 	return srv.URL
+}
+
+func TestFeedBackoff(t *testing.T) {
+	if d := feedBackoff(1); d != 0 {
+		t.Fatalf("первая ошибка без паузы, получили %s", d)
+	}
+	if d := feedBackoff(2); d != time.Minute {
+		t.Fatalf("вторая ошибка — 1м, получили %s", d)
+	}
+	if d := feedBackoff(6); d != 16*time.Minute {
+		t.Fatalf("шестая ошибка — 16м, получили %s", d)
+	}
+	if d := feedBackoff(7); d != 30*time.Minute {
+		t.Fatalf("потолок 30м, получили %s", d)
+	}
+}
+
+func TestPollerSkipsDeadFeedAfterBackoff(t *testing.T) {
+	var hits atomic.Int32
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		http.Error(w, "nope", http.StatusGatewayTimeout)
+	}))
+	t.Cleanup(bad.Close)
+
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	out := make(chan models.Alert, 1)
+	p := &Poller{
+		cfg: config.Config{
+			BackfillHours: 6,
+			EventCooldown: time.Minute,
+			Feeds:         []config.Feed{{Name: "dead", URL: bad.URL}},
+		},
+		store:  st,
+		parser: gofeed.NewParser(),
+		out:    out,
+	}
+	p.parser.Client = bad.Client()
+
+	p.poll(context.Background())
+	p.poll(context.Background())
+	afterSecond := hits.Load()
+	if afterSecond != 2 {
+		t.Fatalf("две ошибки подряд, хитов %d", afterSecond)
+	}
+	p.poll(context.Background())
+	if hits.Load() != afterSecond {
+		t.Fatalf("третья попытка должна быть пропущена из‑за паузы, хитов %d", hits.Load())
+	}
 }
 
 func TestRecentDropsStaleAlerts(t *testing.T) {
