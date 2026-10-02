@@ -109,6 +109,21 @@ func TestSimilarReprintAfterCooldownStillSkipped(t *testing.T) {
 	}
 }
 
+func TestAirportHeadlineIsNotActiveDanger(t *testing.T) {
+	st := openStore(t)
+	if err := st.RecordNotify(models.Alert{
+		ID:      "air",
+		Title:   "Росавиация временно закрыла аэропорт Магнитогорска",
+		Summary: "В соседнем регионе объявлена ракетная опасность",
+		Kind:    models.KindDanger,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if st.ActiveDanger() != nil {
+		t.Fatal("закрытие аэропорта не должно держать режим тревоги")
+	}
+}
+
 func TestNoiseDoesNotBlockRealDanger(t *testing.T) {
 	st := openStore(t)
 	st.LastNotifyKind = "danger"

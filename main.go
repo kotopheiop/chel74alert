@@ -59,11 +59,14 @@ func main() {
 		log.Printf("preflight ok, бот @%s", name)
 	}
 
-	tg, err := bot.New(cfg.Token, st, client, secrets...)
+	tg, err := bot.New(cfg.Token, st, client, cfg.AdminIDs, secrets...)
 	if err != nil {
 		log.Fatalf("telegram: %v", err)
 	}
 	log.Printf("бот @%s запущен, интервал опроса %s", tg.Username(), cfg.PollInterval)
+	if len(cfg.AdminIDs) == 0 {
+		log.Printf("ADMIN_IDS пуст: команды /danger и /clear выключены")
+	}
 
 	alive.Serve(cfg.HealthAddr)
 	alive.Touch()

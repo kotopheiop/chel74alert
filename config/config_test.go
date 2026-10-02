@@ -30,6 +30,7 @@ func TestLoadReadsEnv(t *testing.T) {
 	t.Setenv("BACKFILL_HOURS", "3")
 	t.Setenv("EVENT_COOLDOWN", "10m")
 	t.Setenv("DATA_DIR", "tmp-data")
+	t.Setenv("ADMIN_IDS", "152823378, 7")
 
 	cfg, err := Load()
 	if err != nil {
@@ -40,6 +41,16 @@ func TestLoadReadsEnv(t *testing.T) {
 	}
 	if cfg.PollInterval != 15*time.Second || cfg.BackfillHours != 3 || cfg.EventCooldown != 10*time.Minute {
 		t.Fatalf("тайминги: %+v", cfg)
+	}
+	if len(cfg.AdminIDs) != 2 || cfg.AdminIDs[0] != 152823378 || cfg.AdminIDs[1] != 7 {
+		t.Fatalf("ADMIN_IDS: %+v", cfg.AdminIDs)
+	}
+}
+
+func TestLoadRejectsBadAdminIDs(t *testing.T) {
+	t.Setenv("ADMIN_IDS", "abc")
+	if _, err := Load(); err == nil {
+		t.Fatal("ожидал ошибку ADMIN_IDS")
 	}
 }
 

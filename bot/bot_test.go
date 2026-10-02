@@ -73,13 +73,21 @@ func newTestBotCfg(t *testing.T, st *store.Store, cfg testBotCfg) (*Bot, *[]tgMs
 }
 
 func cmd(chatID int64, command string) tgbotapi.Update {
+	return cmdFrom(chatID, chatID, command, "")
+}
+
+func cmdFrom(chatID, userID int64, command, args string) tgbotapi.Update {
 	text := "/" + command
+	if args != "" {
+		text += " " + args
+	}
 	return tgbotapi.Update{
 		Message: &tgbotapi.Message{
 			MessageID: 1,
+			From:      &tgbotapi.User{ID: userID, FirstName: "u"},
 			Chat:      &tgbotapi.Chat{ID: chatID, Type: "private"},
 			Text:      text,
-			Entities:  []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len(text)}},
+			Entities:  []tgbotapi.MessageEntity{{Type: "bot_command", Offset: 0, Length: len("/" + command)}},
 		},
 	}
 }
@@ -367,6 +375,38 @@ func TestGroupStopByAdmin(t *testing.T) {
 	}
 	if len(*sent) != 1 || !strings.Contains((*sent)[0].Text, "отписались") {
 		t.Fatalf("stop: %s", dump(*sent))
+	}
+}
+
+func TestManualDangerAndClear(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Subscribe(10)
+	b, sent := newTestBot(t, st)
+	b.admins = []int64{7}
+
+	b.handle(cmdFrom(7, 99, "danger", ""))
+	if st.ActiveDanger() != nil {
+		t.Fatal("чужой /danger не должен включать режим")
+	}
+
+	b.handle(cmdFrom(7, 7, "danger", ""))
+	if st.ActiveDanger() == nil {
+		t.Fatal("админ /danger включает режим")
+	}
+	got := dump(*sent)
+	if !strings.Contains(got, "🚨 ВНИМАНИЕ") || !strings.Contains(got, "Режим тревоги включён") {
+		t.Fatalf("рассылка тревоги: %s", got)
+	}
+
+	b.handle(cmdFrom(7, 7, "clear", "Отбой вручную"))
+	if st.ActiveDanger() != nil {
+		t.Fatal("админ /clear снимает режим")
+	}
+	if last := st.LastAlert(); last == nil || last.Title != "Отбой вручную" {
+		t.Fatalf("кастомный отбой: %+v", last)
 	}
 }
 

@@ -229,7 +229,7 @@ func (s *Store) ActiveDanger() *models.Alert {
 	if a == nil || a.Kind != models.KindDanger {
 		return nil
 	}
-	if !looksLikeAlert(a.Title + " " + a.Summary) {
+	if !looksLikeAlert(a.Title) {
 		return nil
 	}
 	return a

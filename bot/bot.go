@@ -20,14 +20,15 @@ type Bot struct {
 	api     *tgbotapi.BotAPI
 	store   *store.Store
 	secrets []string
+	admins  []int64
 }
 
-func New(token string, st *store.Store, client *http.Client, secrets ...string) (*Bot, error) {
+func New(token string, st *store.Store, client *http.Client, adminIDs []int64, secrets ...string) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPIWithClient(token, tgbotapi.APIEndpoint, client)
 	if err != nil {
 		return nil, fmt.Errorf("%s", telegramDialHint(err, append([]string{token}, secrets...)...))
 	}
-	return &Bot{api: api, store: st, secrets: secrets}, nil
+	return &Bot{api: api, store: st, secrets: secrets, admins: adminIDs}, nil
 }
 
 func telegramDialHint(err error, secrets ...string) string {
@@ -150,8 +151,67 @@ func (b *Bot) handle(upd tgbotapi.Update) {
 		}
 		b.sendAlert(chatID, *last)
 	case "help":
-		b.reply(chatID, "Бот следит за RSS-лентами и присылает сообщения о беспилотной/ракетной опасности по Челябинской области\nВ группе подписка включается при добавлении бота\n\n/start /stop /status /last")
+		b.reply(chatID, b.helpText(upd.Message.From))
+	case "danger":
+		b.handleManual(upd.Message, models.KindDanger)
+	case "clear":
+		b.handleManual(upd.Message, models.KindClear)
 	}
+}
+
+func (b *Bot) helpText(from *tgbotapi.User) string {
+	text := "Бот следит за RSS-лентами и присылает сообщения о беспилотной/ракетной опасности по Челябинской области\nВ группе подписка включается при добавлении бота\n\n/start /stop /status /last"
+	if from != nil && b.isAdmin(from.ID) {
+		text += "\n\nАдмин: /danger и /clear — вручную включить или снять режим и разослать подписчикам. Можно добавить текст после команды."
+	}
+	return text
+}
+
+func (b *Bot) isAdmin(userID int64) bool {
+	for _, id := range b.admins {
+		if id == userID {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Bot) handleManual(msg *tgbotapi.Message, kind models.Kind) {
+	if msg.From == nil || !b.isAdmin(msg.From.ID) {
+		b.reply(msg.Chat.ID, "Команда только для администратора бота.")
+		return
+	}
+	title := strings.TrimSpace(msg.CommandArguments())
+	if title == "" {
+		if kind == models.KindDanger {
+			title = "В Челябинской области объявлена беспилотная опасность"
+		} else {
+			title = "В Челябинской области отменён режим беспилотной опасности"
+		}
+	}
+	a := models.Alert{
+		ID:        fmt.Sprintf("manual:%s:%d", kind, time.Now().UnixNano()),
+		Title:     title,
+		Source:    "вручную",
+		Published: time.Now(),
+		Kind:      kind,
+	}
+	if err := b.store.RecordNotify(a); err != nil {
+		log.Printf("ручной режим: %v", err)
+		b.reply(msg.Chat.ID, "Не удалось записать режим.")
+		return
+	}
+	log.Printf("ручной режим [%s] %s", kind, title)
+	if err := b.Notify(context.Background(), a); err != nil {
+		log.Printf("notify: %s", b.redact(err))
+		b.reply(msg.Chat.ID, "Режим записан, но рассылка не прошла. Повторите команду.")
+		return
+	}
+	if kind == models.KindDanger {
+		b.reply(msg.Chat.ID, "Режим тревоги включён, оповещение разослано.")
+		return
+	}
+	b.reply(msg.Chat.ID, "Режим снят, отбой разослан.")
 }
 
 func (b *Bot) canManageSubscription(chatID, userID int64) bool {

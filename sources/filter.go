@@ -15,21 +15,30 @@ var clearVerbs = []string{"снят", "отмен", "заверш"}
 var modeWords = []string{"режим", "опасност"}
 
 func Classify(cfg config.Config, title, summary string, regionImplicit bool) (models.Kind, bool) {
-	text := normalize(title + " " + stripHTML(summary))
+	titleN := normalize(title)
+	bodyN := normalize(stripHTML(summary))
+	text := strings.TrimSpace(titleN + " " + bodyN)
 	if !regionImplicit && !containsAny(text, cfg.RegionKeywords) {
 		return "", false
 	}
-	if isInvestigation(text) && !hasAlertSpeech(text) {
+	if isInvestigation(text) && !hasAlertSpeech(titleN) {
 		return "", false
 	}
-	clear := isAllClear(text, cfg.ClearKeywords)
-	if !clear && !isOfficialAlert(text, cfg.ThreatKeywords) {
+	if isAviationSideNews(titleN) {
+		return "", false
+	}
+	clear := isAllClear(titleN, cfg.ClearKeywords)
+	if !clear && !isOfficialAlert(titleN, cfg.ThreatKeywords) {
 		return "", false
 	}
 	if clear {
 		return models.KindClear, true
 	}
 	return models.KindDanger, true
+}
+
+func isAviationSideNews(title string) bool {
+	return containsAny(title, []string{"аэропорт", "росавиац"})
 }
 
 func isOfficialAlert(text string, threat []string) bool {

@@ -26,6 +26,7 @@ type Config struct {
 	EventCooldown  time.Duration
 	DataDir        string
 	HealthAddr     string
+	AdminIDs       []int64
 	Feeds          []Feed
 	ThreatKeywords []string
 	ClearKeywords  []string
@@ -64,6 +65,13 @@ func Load() (Config, error) {
 	if v, ok := os.LookupEnv("HEALTH_ADDR"); ok {
 		cfg.HealthAddr = strings.TrimSpace(v)
 	}
+	if v := strings.TrimSpace(os.Getenv("ADMIN_IDS")); v != "" {
+		ids, err := parseAdminIDs(v)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.AdminIDs = ids
+	}
 
 	if v := strings.TrimSpace(os.Getenv("RSS_FEEDS_JSON")); v != "" {
 		var feeds []Feed
@@ -88,6 +96,28 @@ func Load() (Config, error) {
 	cfg.ProxyUser = strings.TrimSpace(os.Getenv("TG_PROXY_USER"))
 	cfg.ProxyPassword = os.Getenv("TG_PROXY_PASSWORD")
 	return cfg, nil
+}
+
+func parseAdminIDs(v string) ([]int64, error) {
+	var ids []int64
+	for _, p := range strings.Split(v, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		id, err := strconv.ParseInt(p, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("ADMIN_IDS %q: %w", p, err)
+		}
+		if id == 0 {
+			return nil, fmt.Errorf("ADMIN_IDS: нулевой id")
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("ADMIN_IDS: список пуст")
+	}
+	return ids, nil
 }
 
 func Defaults() Config {
