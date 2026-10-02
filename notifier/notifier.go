@@ -16,7 +16,6 @@ func Format(a models.Alert) string {
 	}
 
 	title := html.EscapeString(a.Title)
-	source := html.EscapeString(a.Source)
 	when := a.Published.In(time.Local).Format("02.01.2006 15:04")
 	if a.Published.IsZero() {
 		when = "время неизвестно"
@@ -24,7 +23,9 @@ func Format(a models.Alert) string {
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\n\n<b>%s</b>\n", header, title)
-	fmt.Fprintf(&b, "\nИсточник: %s", source)
+	if src := strings.TrimSpace(a.Source); src != "" && src != "вручную" {
+		fmt.Fprintf(&b, "\nИсточник: %s", html.EscapeString(src))
+	}
 	fmt.Fprintf(&b, "\nВремя: %s", when)
 	if a.URL != "" {
 		fmt.Fprintf(&b, "\n%s", html.EscapeString(a.URL))

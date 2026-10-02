@@ -37,6 +37,9 @@ func TestFormatDangerAndClear(t *testing.T) {
 	if !strings.Contains(clear, "время неизвестно") {
 		t.Fatalf("пустое время: %s", clear)
 	}
+	if strings.Contains(clear, "Источник:") {
+		t.Fatalf("пустой источник не должен печататься: %s", clear)
+	}
 }
 
 func TestThreatName(t *testing.T) {

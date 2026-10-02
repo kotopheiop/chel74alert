@@ -401,6 +401,10 @@ func TestManualDangerAndClear(t *testing.T) {
 		t.Fatalf("рассылка тревоги: %s", got)
 	}
 
+	if strings.Contains(got, "Источник:") {
+		t.Fatalf("ручная тревога без источника: %s", got)
+	}
+
 	b.handle(cmdFrom(7, 7, "clear", "Отбой вручную"))
 	if st.ActiveDanger() != nil {
 		t.Fatal("админ /clear снимает режим")

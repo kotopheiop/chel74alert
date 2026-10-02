@@ -192,7 +192,6 @@ func (b *Bot) handleManual(msg *tgbotapi.Message, kind models.Kind) {
 	a := models.Alert{
 		ID:        fmt.Sprintf("manual:%s:%d", kind, time.Now().UnixNano()),
 		Title:     title,
-		Source:    "вручную",
 		Published: time.Now(),
 		Kind:      kind,
 	}
